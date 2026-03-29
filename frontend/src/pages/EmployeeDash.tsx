@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import toast from 'react-hot-toast';
 import { Upload, Plus, RefreshCw } from 'lucide-react';
 import { StaggerList, StaggerItem, ShimmerButton } from '../components/ui';
 
@@ -166,24 +165,22 @@ export default function EmployeeDash() {
         setConfidence(prev => ({ ...prev, date: res.data.suggestedDate.confidence }));
       }
       setDescription('Auto-extracted from receipt scan');
-      toast.success('Receipt scanned successfully!');
     } catch (err: any) {
-      toast.error('OCR Failed: ' + (err.response?.data?.error || err.message));
+      alert('OCR Failed: ' + (err.response?.data?.error || err.message));
     } finally { setOcrLoading(false); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || isNaN(parseFloat(amount))) { toast.error('Please enter a valid amount'); return; }
+    if (!amount || isNaN(parseFloat(amount))) { alert('Please enter a valid amount'); return; }
     setSubmitting(true);
     try {
       await axios.post(`${API}/api/expenses`, { amount: parseFloat(amount), originalCurrency, category, description, date }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       setAmount(''); setCategory('Travel'); setDate(new Date().toISOString().split('T')[0]);
       setDescription(''); setFile(null); setConfidence({ amount: 0, category: 0, date: 0 }); setRiskData(null);
-      toast.success('Expense submitted successfully!');
       fetchExpenses();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Submission failed');
+      alert(err.response?.data?.error || 'Submission failed');
     } finally { setSubmitting(false); }
   };
 

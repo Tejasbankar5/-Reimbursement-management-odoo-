@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import toast from 'react-hot-toast';
 import { UserPlus, Settings, Check, X, ShieldAlert, BarChart3 } from 'lucide-react';
 import { StatCard, ShimmerButton, StaggerList, StaggerItem } from '../components/ui';
 
@@ -69,7 +68,7 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
       });
       fetchDirectorQueue();
       fetchClaims();
-    } catch (err: any) { toast.error(err.response?.data?.error || 'Review failed'); }
+    } catch (err: any) { alert(err.response?.data?.error || 'Review failed'); }
   };
 
   const handleOverride = async (expenseId: string, status: 'APPROVED' | 'REJECTED') => {
@@ -79,21 +78,21 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
         status, comments: `Admin override — ${status.toLowerCase()} manually`
       });
       fetchClaims();
-    } catch (err: any) { toast.error(err.response?.data?.error || 'Override failed'); }
+    } catch (err: any) { alert(err.response?.data?.error || 'Override failed'); }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    if (!password || password.length < 6) { alert('Password must be at least 6 characters'); return; }
     try {
       await axios.post(`${API}/api/admin/users`, {
         email, name, role, password,
         managerId: (role === 'EMPLOYEE' && managerId) ? managerId : undefined
       });
-      toast.success(`User "${name}" created!\nLogin: ${email} / ${password}`);
+      alert(`✅ User "${name}" created!\nLogin: ${email} / ${password}`);
       setEmail(''); setName(''); setPassword(''); setManagerId('');
       fetchUsers();
-    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    } catch (err: any) { alert(err.response?.data?.error || 'Failed'); }
   };
 
   const [workflowPreset, setWorkflowPreset] = useState('SEQUENCE');
@@ -110,13 +109,13 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
         steps.push({ sequenceIndex: 0, ruleType: 'PERCENTAGE', approverRole: 'MANAGER', ruleValue: '51' });
         steps.push({ sequenceIndex: 1, ruleType: 'SEQUENCE', approverRole: 'ADMIN' });
       } else if (workflowPreset === 'HYBRID') {
-        if (!hybridOverrideId) { toast.error('Select the executive for the override.'); return; }
+        if (!hybridOverrideId) return alert('Select the executive for the override.');
         steps.push({ sequenceIndex: 0, ruleType: 'HYBRID', approverRole: 'MANAGER', ruleValue: hybridOverrideId });
         steps.push({ sequenceIndex: 1, ruleType: 'SEQUENCE', approverRole: 'ADMIN' });
       }
       await axios.post(`${API}/api/admin/workflows`, { name: workflowName, steps });
-      toast.success(`Workflow saved! (${workflowPreset} active)`);
-    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+      alert(`✅ Workflow saved! (${workflowPreset} active)`);
+    } catch (err: any) { alert(err.response?.data?.error || 'Failed'); }
   };
 
   // Reusable expense badge
@@ -400,9 +399,9 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
           <ShimmerButton variant="outline" onClick={async () => {
             try {
               const res = await axios.post(`${API}/api/admin/system/self-heal`);
-              toast.success(res.data.message);
+              alert(res.data.message);
               fetchClaims(); fetchDirectorQueue();
-            } catch (err: any) { toast.error(err.response?.data?.error || 'Self-heal failed'); }
+            } catch (err: any) { alert(err.response?.data?.error || 'Self-heal failed'); }
           }} style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}>
             🔄 Simulate 48h Timeout (Self-heal)
           </ShimmerButton>

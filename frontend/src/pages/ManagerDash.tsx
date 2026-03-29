@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import toast from 'react-hot-toast';
 import { Check, X } from 'lucide-react';
 import { StaggerList, StaggerItem, ShimmerButton } from '../components/ui';
 
@@ -35,10 +34,9 @@ export default function ManagerDash({ view = 'approvals' }: { view?: 'approvals'
   const handleReview = async (approvalId: string, status: 'APPROVED' | 'REJECTED') => {
     try {
       await axios.post(`${API}/api/approvals/${approvalId}/review`, { status });
-      toast.success(`Expense ${status.toLowerCase()} successfully`);
       fetchExpenses();
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to review');
+      alert(err.response?.data?.error || 'Failed to review');
     }
   };
 
