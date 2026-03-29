@@ -245,7 +245,10 @@ Important core transactional endpoints.
 
 ## 👨💻 Contributors
 
-* Developed & architected by the **Team**
+* Developed & architected by the **Team Turbotech**
+* Athrv Shinde
+* Tejas Bankar
+* Abhishek Bochare
 
 ---
 
