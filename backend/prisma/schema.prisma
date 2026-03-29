@@ -1,0 +1,113 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RuleType {
+  SEQUENCE
+  PERCENTAGE
+  SPECIFIC_APPROVER
+  HYBRID
+}
+
+model Company {
+  id            String    @id @default(uuid())
+  name          String
+  country       String?
+  baseCurrency  String    @default("USD")
+  createdAt     DateTime  @default(now())
+
+  users         User[]
+  workflows     Workflow[]
+  expenses      Expense[]
+}
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  name          String
+  role          Role      @default(EMPLOYEE)
+  companyId     String
+  managerId     String?
+  createdAt     DateTime  @default(now())
+
+  company       Company   @relation(fields: [companyId], references: [id])
+  manager       User?     @relation("ManagerToEmployee", fields: [managerId], references: [id])
+  employees     User[]    @relation("ManagerToEmployee")
+  expenses      Expense[]
+  approvals     ExpenseApproval[]
+}
+
+model Workflow {
+  id            String    @id @default(uuid())
+  companyId     String
+  name          String
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  company       Company   @relation(fields: [companyId], references: [id])
+  steps         WorkflowStep[]
+}
+
+model WorkflowStep {
+  id            String    @id @default(uuid())
+  workflowId    String
+  sequenceIndex Int       // e.g., 0, 1, 2 for sequence
+  approverId    String?   // User ID if specific approver
+  approverRole  Role?     // If approving by Role (e.g., any MANAGER)
+  ruleType      RuleType  @default(SEQUENCE)
+  ruleValue     String?   // JSON or string (like "50%")
+  
+  workflow      Workflow  @relation(fields: [workflowId], references: [id])
+}
+
+model Expense {
+  id              String        @id @default(uuid())
+  userId          String
+  companyId       String
+  amount          Float
+  originalCurrency String       @default("USD")
+  convertedAmount Float?
+  category        String
+  description     String?
+  receiptUrl      String?
+  date            DateTime
+  status          ExpenseStatus @default(PENDING)
+  currentStepIndex Int          @default(0)
+  createdAt       DateTime      @default(now())
+
+  user            User          @relation(fields: [userId], references: [id])
+  company         Company       @relation(fields: [companyId], references: [id])
+  approvals       ExpenseApproval[]
+}
+
+model ExpenseApproval {
+  id            String        @id @default(uuid())
+  expenseId     String
+  stepIndex     Int
+  approverId    String
+  status        ExpenseStatus @default(PENDING)
+  comments      String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  expense       Expense       @relation(fields: [expenseId], references: [id])
+  approver      User          @relation(fields: [approverId], references: [id])
+}
