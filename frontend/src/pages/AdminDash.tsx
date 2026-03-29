@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 import { UserPlus, Settings, Check, X, ShieldAlert, BarChart3 } from 'lucide-react';
 import { StatCard, ShimmerButton, StaggerList, StaggerItem } from '../components/ui';
 
@@ -68,7 +69,7 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
       });
       fetchDirectorQueue();
       fetchClaims();
-    } catch (err: any) { alert(err.response?.data?.error || 'Review failed'); }
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Review failed'); }
   };
 
   const handleOverride = async (expenseId: string, status: 'APPROVED' | 'REJECTED') => {
@@ -78,34 +79,44 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
         status, comments: `Admin override — ${status.toLowerCase()} manually`
       });
       fetchClaims();
-    } catch (err: any) { alert(err.response?.data?.error || 'Override failed'); }
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Override failed'); }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!password || password.length < 6) { alert('Password must be at least 6 characters'); return; }
+    if (!password || password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     try {
       await axios.post(`${API}/api/admin/users`, {
         email, name, role, password,
         managerId: (role === 'EMPLOYEE' && managerId) ? managerId : undefined
       });
-      alert(`✅ User "${name}" created!\nLogin: ${email} / ${password}`);
+      toast.success(`User "${name}" created!\nLogin: ${email} / ${password}`);
       setEmail(''); setName(''); setPassword(''); setManagerId('');
       fetchUsers();
-    } catch (err: any) { alert(err.response?.data?.error || 'Failed'); }
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   };
+
+  const [workflowPreset, setWorkflowPreset] = useState('SEQUENCE');
+  const [hybridOverrideId, setHybridOverrideId] = useState('');
 
   const handleCreateWorkflow = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const steps: any[] = [];
-      if (managerApproverSelected) {
+      if (workflowPreset === 'SEQUENCE') {
         steps.push({ sequenceIndex: 0, ruleType: 'SEQUENCE', approverRole: 'MANAGER' });
+        steps.push({ sequenceIndex: 1, ruleType: 'SEQUENCE', approverRole: 'ADMIN' });
+      } else if (workflowPreset === 'PERCENTAGE') {
+        steps.push({ sequenceIndex: 0, ruleType: 'PERCENTAGE', approverRole: 'MANAGER', ruleValue: '51' });
+        steps.push({ sequenceIndex: 1, ruleType: 'SEQUENCE', approverRole: 'ADMIN' });
+      } else if (workflowPreset === 'HYBRID') {
+        if (!hybridOverrideId) { toast.error('Select the executive for the override.'); return; }
+        steps.push({ sequenceIndex: 0, ruleType: 'HYBRID', approverRole: 'MANAGER', ruleValue: hybridOverrideId });
         steps.push({ sequenceIndex: 1, ruleType: 'SEQUENCE', approverRole: 'ADMIN' });
       }
       await axios.post(`${API}/api/admin/workflows`, { name: workflowName, steps });
-      alert('✅ Workflow saved! (Manager → Director chain)');
-    } catch (err: any) { alert(err.response?.data?.error || 'Failed'); }
+      toast.success(`Workflow saved! (${workflowPreset} active)`);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   };
 
   // Reusable expense badge
@@ -278,15 +289,30 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
           <h3 style={{ marginBottom: '1.25rem' }}>Configure Approval Chain</h3>
           <form onSubmit={handleCreateWorkflow}>
             <input type="text" className="glass-input" placeholder="Workflow Name *" value={workflowName} onChange={e => setWorkflowName(e.target.value)} required style={{ marginBottom: '1rem' }} />
-            <label style={{ display: 'flex', gap: '1rem', alignItems: 'center', margin: '1rem 0', color: 'var(--text-secondary)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={managerApproverSelected} onChange={e => setManagerApproverSelected(e.target.checked)} style={{ width: 16, height: 16 }} />
-              <span>Enable <strong>Manager → Director</strong> two-step approval chain</span>
-            </label>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem', lineHeight: 1.6 }}>
-              Step 1: Employee's Manager approves → Step 2: Director (Admin) gives final approval.
-            </p>
+            
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.5rem', fontWeight: 600 }}>Approval Logic Rule</label>
+              <select className="glass-input" value={workflowPreset} onChange={e => setWorkflowPreset(e.target.value)}>
+                <option value="SEQUENCE">Standard Sequence (1 Manager → Admin)</option>
+                <option value="PERCENTAGE">Democratic (51% of ALL Managers → Admin)</option>
+                <option value="HYBRID">Hybrid (51% of ALL Managers OR Executive Override → Admin)</option>
+              </select>
+            </div>
+
+            {workflowPreset === 'HYBRID' && (
+              <div style={{ marginBottom: '1.5rem', padding: '1rem', background: 'rgba(217,119,6,0.1)', borderRadius: '8px', border: '1px solid rgba(217,119,6,0.2)' }}>
+                <label style={{ display: 'block', fontSize: '0.9rem', marginBottom: '0.5rem', fontWeight: 600, color: '#b45309' }}>Select Executive for Override Power</label>
+                <select className="glass-input" value={hybridOverrideId} onChange={e => setHybridOverrideId(e.target.value)} required>
+                   <option value="">-- Select Executive User --</option>
+                   {users.filter(u => u.role === 'ADMIN' || u.role === 'MANAGER').map(u => (
+                      <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                   ))}
+                </select>
+              </div>
+            )}
+
             <ShimmerButton variant="primary" style={{ maxWidth: 240 }}>
-              <Settings size={18} />Save & Activate Workflow
+              <Settings size={18} />Activate Workflow
             </ShimmerButton>
           </form>
         </div>
@@ -364,11 +390,22 @@ export default function AdminDash({ view = 'overview' }: { view?: View }) {
         )}
       </div>
 
-      {/* Summary */}
+      {/* Summary with Self-heal Simulation */}
       <div className="glass-panel">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-          <BarChart3 size={20} color="var(--primary)" />
-          <h3 style={{ margin: 0 }}>Quick Summary</h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <BarChart3 size={20} color="var(--primary)" />
+            <h3 style={{ margin: 0 }}>Quick Summary & Operations</h3>
+          </div>
+          <ShimmerButton variant="outline" onClick={async () => {
+            try {
+              const res = await axios.post(`${API}/api/admin/system/self-heal`);
+              toast.success(res.data.message);
+              fetchClaims(); fetchDirectorQueue();
+            } catch (err: any) { toast.error(err.response?.data?.error || 'Self-heal failed'); }
+          }} style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}>
+            🔄 Simulate 48h Timeout (Self-heal)
+          </ShimmerButton>
         </div>
         <p style={{ color: 'var(--text-muted)', lineHeight: 1.7, fontSize: '0.9rem' }}>
           You have <strong style={{ color: 'var(--text-main)' }}>{stats.total} total expense claims</strong> across your company.

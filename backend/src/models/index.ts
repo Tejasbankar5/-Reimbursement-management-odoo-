@@ -52,7 +52,11 @@ Expense.init({
   receiptUrl: { type: DataTypes.STRING, allowNull: true },
   date: { type: DataTypes.DATE, allowNull: false },
   status: { type: DataTypes.ENUM('PENDING', 'APPROVED', 'REJECTED'), defaultValue: 'PENDING' },
-  currentStepIndex: { type: DataTypes.INTEGER, defaultValue: 0 }
+  currentStepIndex: { type: DataTypes.INTEGER, defaultValue: 0 },
+  riskScore: { type: DataTypes.ENUM('LOW', 'MEDIUM', 'HIGH'), defaultValue: 'LOW' },
+  riskReasoning: { type: DataTypes.STRING, allowNull: true },
+  fraudWarning: { type: DataTypes.BOOLEAN, defaultValue: false },
+  explanation: { type: DataTypes.TEXT, allowNull: true }
 }, { sequelize, modelName: 'Expense', tableName: 'Expenses' });
 
 export class ExpenseApproval extends Model {}

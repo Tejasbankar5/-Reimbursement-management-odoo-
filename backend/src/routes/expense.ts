@@ -22,23 +22,96 @@ router.post('/ocr', requireAuth, upload.single('receipt'), async (req: Request, 
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const { data: { text } } = await tesseract.recognize(req.file.path, 'eng');
+    const { data } = await tesseract.recognize(req.file.path, 'eng');
+    const text = data.text;
+    const overallConfidence = data.confidence;
 
     // Extract amount from OCR text
     const amountMatch = text.match(/\$?\s*(\d{1,6}(?:\.\d{1,2})?)/);
     const amount = amountMatch ? parseFloat(amountMatch[1]) : 0;
+    const amountConfidence = amountMatch ? Math.min(overallConfidence + 5, 99) : 40;
 
     // Keyword match for category
     let category = 'Other';
     const lowerText = text.toLowerCase();
-    if (lowerText.includes('flight') || lowerText.includes('hotel') || lowerText.includes('airbnb')) category = 'Travel';
-    else if (lowerText.includes('uber') || lowerText.includes('taxi') || lowerText.includes('lyft')) category = 'Transport';
-    else if (lowerText.includes('restaurant') || lowerText.includes('food') || lowerText.includes('cafe')) category = 'Meals';
+    let catConfidence = 50;
+    if (lowerText.includes('flight') || lowerText.includes('hotel') || lowerText.includes('airbnb')) { category = 'Travel'; catConfidence = 95; }
+    else if (lowerText.includes('uber') || lowerText.includes('taxi') || lowerText.includes('lyft')) { category = 'Transport'; catConfidence = 92; }
+    else if (lowerText.includes('restaurant') || lowerText.includes('food') || lowerText.includes('cafe')) { category = 'Meals'; catConfidence = 90; }
+
+    // Date extraction basic regex
+    const dateMatch = text.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+    const date = dateMatch ? dateMatch[1] : new Date().toISOString().split('T')[0];
+    const dateConfidence = dateMatch ? Math.min(overallConfidence + 2, 98) : 50;
 
     // Clean up uploaded file
     try { fs.unlinkSync(req.file.path); } catch (_) {}
 
-    res.json({ ocrText: text, suggestedAmount: amount, suggestedCategory: category });
+    res.json({
+      ocrText: text,
+      suggestedAmount: { value: amount, confidence: Math.round(amountConfidence) },
+      suggestedCategory: { value: category, confidence: Math.round(catConfidence) },
+      suggestedDate: { value: date, confidence: Math.round(dateConfidence) }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Analyze Expense (Risk & Fraud) Before Submission
+router.post('/analyze', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const { amount, originalCurrency, category, date } = req.body;
+
+    const company = await Company.findByPk(user.companyId) as any;
+    let convertedAmount = parseFloat(amount || 0);
+
+    if (originalCurrency && originalCurrency !== company?.baseCurrency) {
+      try {
+        const rateRes = await axios.get(`https://api.exchangerate-api.com/v4/latest/${originalCurrency}`);
+        const rate = rateRes.data.rates[company.baseCurrency];
+        if (rate) convertedAmount = parseFloat(amount) * rate;
+      } catch (err) {}
+    }
+
+    let riskScore = 'LOW';
+    let riskReasoning = 'Standard expense within limits.';
+    let fraudWarning = false;
+
+    if (category === 'Travel' && convertedAmount > 10000) {
+      riskScore = 'HIGH';
+      riskReasoning = 'High Risk: Travel expense > 10,000 requires multiple approvals.';
+    } else if (category === 'Meals' && convertedAmount > 5000) {
+      riskScore = 'HIGH';
+      riskReasoning = 'High Risk: Meals expense > 5,000 is usually prohibited.';
+    } else if (convertedAmount > 5000) {
+      riskScore = 'MEDIUM';
+      riskReasoning = 'Medium Risk: Expense > 5,000.';
+    }
+
+    // Fraud / Duplicate Check
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0,0,0,0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23,59,59,999);
+
+    const duplicate = await Expense.findOne({
+      where: {
+        userId: user.id,
+        amount: parseFloat(amount),
+        category,
+        date: { [Op.between]: [startOfDay, endOfDay] }
+      }
+    });
+
+    if (duplicate) {
+      fraudWarning = true;
+      riskScore = 'HIGH';
+      riskReasoning += ' Fraud Alert: Similar expense submitted recently (Same day, amount, and category).';
+    }
+
+    res.json({ riskScore, riskReasoning, fraudWarning });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -69,6 +142,33 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
+    const dateObj = new Date(date);
+    
+    // Quick risk calc internally
+    let riskScore = 'LOW';
+    let riskReasoning = 'Standard expense within limits.';
+    if (category === 'Travel' && convertedAmount > 10000) { riskScore = 'HIGH'; riskReasoning = 'High Risk: Travel expense > 10,000.'; }
+    else if (category === 'Meals' && convertedAmount > 5000) { riskScore = 'HIGH'; riskReasoning = 'High Risk: Meals expense > 5,000.'; }
+    else if (convertedAmount > 5000) { riskScore = 'MEDIUM'; riskReasoning = 'Medium Risk: Expense > 5,000.'; }
+
+    const duplicate = await Expense.findOne({
+      where: {
+        userId: user.id,
+        amount: parseFloat(amount),
+        category,
+        date: {
+          [Op.gte]: new Date(dateObj.setHours(0,0,0,0)),
+          [Op.lt]: new Date(dateObj.setHours(23,59,59,999))
+        }
+      }
+    });
+
+    const isFraud = !!duplicate;
+    if (isFraud) {
+      riskScore = 'HIGH';
+      riskReasoning += ' Fraud Alert: Similar expense submitted recently.';
+    }
+
     const newExpense = await Expense.create({
       userId: user.id,
       companyId: user.companyId,
@@ -80,69 +180,23 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       date: new Date(date),
       receiptUrl,
       status: 'PENDING',
-      currentStepIndex: 0
+      currentStepIndex: 0,
+      riskScore,
+      riskReasoning,
+      fraudWarning: isFraud,
+      explanation: 'Submitted and pending initial routing.'
     }) as any;
 
-    // Check if an active workflow exists for the company
-    const activeWorkflow = await Workflow.findOne({ where: { companyId: user.companyId, isActive: true } }) as any;
+    // Call intelligent engine to route to first step
+    const { routeToStep } = require('../engine');
+    const successfullyRouted = await routeToStep(newExpense, 0);
 
-    if (activeWorkflow) {
-      const firstStep = await WorkflowStep.findOne({
-        where: { workflowId: activeWorkflow.id, sequenceIndex: 0 },
-        order: [['sequenceIndex', 'ASC']]
-      }) as any;
-
-      if (firstStep) {
-        let assignedApproverId: string | null = firstStep.approverId || null;
-
-        // If first step requires a Manager approver, assign to employee's manager
-        if (firstStep.approverRole === 'MANAGER' && !assignedApproverId) {
-          if (user.managerId) {
-            assignedApproverId = user.managerId;
-          } else {
-            // Fallback: find any manager in the company
-            const anyManager = await User.findOne({
-              where: { companyId: user.companyId, role: 'MANAGER' }
-            }) as any;
-            if (anyManager) {
-              assignedApproverId = anyManager.id;
-              console.info(`[Expense] Routed to company manager: ${anyManager.name}`);
-            }
-          }
-        }
-
-        if (assignedApproverId) {
-          await ExpenseApproval.create({
-            expenseId: newExpense.id,
-            stepIndex: 0,
-            approverId: assignedApproverId,
-            status: 'PENDING'
-          });
-          // Expense stays PENDING until manager reviews
-        } else {
-          // Workflow exists but no approver at all — keep PENDING, never auto-approve
-          console.warn(`[Expense ${newExpense.id}] No approver found. Keeping PENDING for manual review.`);
-        }
+    if (!successfullyRouted) {
+      if (user.role === 'ADMIN' || user.role === 'MANAGER') {
+        // Admin/Manager submitting with no workflow -> Auto-approve
+        await newExpense.update({ status: 'APPROVED', explanation: 'Auto-approved due to role seniority (No workflow configured).' });
       } else {
-        // Workflow has no steps defined — keep PENDING (shouldn't happen in practice)
-        console.warn(`[Expense ${newExpense.id}] Workflow has no steps. Keeping PENDING.`);
-      }
-    } else {
-      // No workflow configured — try to route to manager anyway before giving up
-      if (user.managerId) {
-        await ExpenseApproval.create({
-          expenseId: newExpense.id,
-          stepIndex: 0,
-          approverId: user.managerId,
-          status: 'PENDING'
-        });
-        console.info(`[Expense] No workflow; routed directly to assigned manager.`);
-      } else if (user.role === 'EMPLOYEE') {
-        // Employee has no manager and no workflow — keep PENDING so admin can review
-        console.warn(`[Expense ${newExpense.id}] Employee has no manager and no workflow. Keeping PENDING.`);
-      } else {
-        // Admin/Manager submitting their own expense with no workflow — auto-approve
-        await newExpense.update({ status: 'APPROVED' });
+        await newExpense.update({ explanation: 'Pending generic manual review (No approver found).' });
       }
     }
 

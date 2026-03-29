@@ -1,65 +1,48 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 import { Upload, Plus, RefreshCw } from 'lucide-react';
 import { StaggerList, StaggerItem, ShimmerButton } from '../components/ui';
 
 const API = 'http://localhost:5000';
 
-// Helper: compute the readable status + approval timeline for an expense
 function getExpenseTimeline(exp: any) {
   const approvals = exp.approvals || [];
-  const managerApproval = approvals.find((a: any) => a.stepIndex === 0);
-  const adminApproval   = approvals.find((a: any) => a.stepIndex === 1);
+  
+  // Group approvals by stepIndex
+  const groupedApprovals = approvals.reduce((acc: any, curr: any) => {
+    if (!acc[curr.stepIndex]) acc[curr.stepIndex] = [];
+    acc[curr.stepIndex].push(curr);
+    return acc;
+  }, {});
 
   const steps = [
-    {
-      label: 'Submitted',
-      sublabel: 'Expense submitted by you',
-      status: 'done' as const,
-      icon: '📤',
-    },
-    {
-      label: 'Manager Review',
-      sublabel: managerApproval?.status === 'APPROVED'
-        ? `✓ Approved by Manager${managerApproval.approver ? ` (${managerApproval.approver.name})` : ''}`
-        : managerApproval?.status === 'REJECTED'
-          ? `✗ Rejected by Manager${managerApproval.approver ? ` (${managerApproval.approver.name})` : ''}`
-          : 'Awaiting manager approval',
-      status: managerApproval?.status === 'APPROVED' ? 'done'
-            : managerApproval?.status === 'REJECTED' ? 'rejected'
-            : 'pending' as const,
-      icon: managerApproval?.status === 'APPROVED' ? '✅'
-          : managerApproval?.status === 'REJECTED' ? '❌' : '⏳',
-    },
-    {
-      label: 'Director Approval',
-      sublabel: adminApproval?.status === 'APPROVED'
-        ? `✓ Approved by Director${adminApproval.approver ? ` (${adminApproval.approver.name})` : ''}`
-        : adminApproval?.status === 'REJECTED'
-          ? `✗ Rejected by Director${adminApproval.approver ? ` (${adminApproval.approver.name})` : ''}`
-          : managerApproval?.status === 'APPROVED'
-            ? 'Awaiting director approval'
-            : 'Pending manager approval first',
-      status: adminApproval?.status === 'APPROVED' ? 'done'
-            : adminApproval?.status === 'REJECTED' ? 'rejected'
-            : managerApproval?.status === 'APPROVED' ? 'pending'
-            : 'idle' as const,
-      icon: adminApproval?.status === 'APPROVED' ? '✅'
-          : adminApproval?.status === 'REJECTED' ? '❌'
-          : managerApproval?.status === 'APPROVED' ? '⏳' : '🔒',
-    },
-    {
-      label: exp.status === 'APPROVED' ? 'Fully Approved' : 'Final Decision',
-      sublabel: exp.status === 'APPROVED'
-        ? '🎉 Expense reimbursement approved!'
-        : exp.status === 'REJECTED' ? 'Expense was rejected'
-        : 'Awaiting all approvals',
-      status: exp.status === 'APPROVED' ? 'done'
-            : exp.status === 'REJECTED' ? 'rejected'
-            : 'idle' as const,
-      icon: exp.status === 'APPROVED' ? '🎉' : exp.status === 'REJECTED' ? '❌' : '⏸️',
-    }
+    { label: 'Submitted', sublabel: 'Expense submitted by you', status: 'done', icon: '📤' }
   ];
+
+  Object.keys(groupedApprovals).forEach((stepIndex) => {
+    const stepApprovals = groupedApprovals[stepIndex];
+    const isApproved = stepApprovals.some((a: any) => a.status === 'APPROVED');
+    const isRejected = stepApprovals.some((a: any) => a.status === 'REJECTED');
+    
+    let sublabel = stepApprovals.map((a:any) => `${a.approver?.name || 'Approver'} (${a.status})`).join(', ');
+    if (isApproved) sublabel = 'Approved by step members';
+    if (isRejected) sublabel = 'Rejected at this step';
+
+    steps.push({
+      label: `Approval Step ${parseInt(stepIndex) + 1}`,
+      sublabel,
+      status: isApproved ? 'done' : isRejected ? 'rejected' : 'pending',
+      icon: isApproved ? '✅' : isRejected ? '❌' : '⏳'
+    });
+  });
+
+  steps.push({
+    label: exp.status === 'APPROVED' ? 'Fully Approved' : exp.status === 'REJECTED' ? 'Rejected' : 'Final Decision',
+    sublabel: exp.explanation || (exp.status === 'APPROVED' ? '🎉 Expense reimbursement approved!' : exp.status === 'REJECTED' ? 'Expense was rejected' : 'Awaiting all approvals'),
+    status: exp.status === 'APPROVED' ? 'done' : exp.status === 'REJECTED' ? 'rejected' : 'idle',
+    icon: exp.status === 'APPROVED' ? '🎉' : exp.status === 'REJECTED' ? '❌' : '⏸️',
+  });
 
   return steps;
 }
@@ -132,13 +115,30 @@ export default function EmployeeDash() {
   const [category, setCategory] = useState('Travel');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
+  const [confidence, setConfidence] = useState({ amount: 0, category: 0, date: 0 });
+  const [riskData, setRiskData] = useState<{riskScore: string, riskReasoning: string, fraudWarning: boolean} | null>(null);
 
   useEffect(() => { fetchExpenses(); }, []);
+
+  useEffect(() => {
+    if (amount) {
+      const timer = setTimeout(async () => {
+        try {
+          // Assume token is handled by the globally injected axios interceptor
+          const res = await axios.post(`${API}/api/expenses/analyze`, { amount, originalCurrency, category, date }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+          setRiskData(res.data);
+        } catch (e) {}
+      }, 500);
+      return () => clearTimeout(timer);
+    } else {
+      setRiskData(null);
+    }
+  }, [amount, originalCurrency, category, date]);
 
   const fetchExpenses = async () => {
     try {
       setLoading(true);
-      const res = await axios.get(`${API}/api/expenses`);
+      const res = await axios.get(`${API}/api/expenses`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       setExpenses(res.data || []);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
@@ -151,27 +151,39 @@ export default function EmployeeDash() {
     formData.append('receipt', file);
     try {
       const res = await axios.post(`${API}/api/expenses/ocr`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      if (res.data.suggestedAmount) setAmount(res.data.suggestedAmount.toString());
-      if (res.data.suggestedCategory) setCategory(res.data.suggestedCategory);
+      if (res.data.suggestedAmount) {
+        setAmount(res.data.suggestedAmount.value.toString());
+        setConfidence(prev => ({ ...prev, amount: res.data.suggestedAmount.confidence }));
+      }
+      if (res.data.suggestedCategory) {
+        setCategory(res.data.suggestedCategory.value);
+        setConfidence(prev => ({ ...prev, category: res.data.suggestedCategory.confidence }));
+      }
+      if (res.data.suggestedDate) {
+        setDate(res.data.suggestedDate.value);
+        setConfidence(prev => ({ ...prev, date: res.data.suggestedDate.confidence }));
+      }
       setDescription('Auto-extracted from receipt scan');
+      toast.success('Receipt scanned successfully!');
     } catch (err: any) {
-      alert('OCR Failed: ' + (err.response?.data?.error || err.message));
+      toast.error('OCR Failed: ' + (err.response?.data?.error || err.message));
     } finally { setOcrLoading(false); }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || isNaN(parseFloat(amount))) { alert('Please enter a valid amount'); return; }
+    if (!amount || isNaN(parseFloat(amount))) { toast.error('Please enter a valid amount'); return; }
     setSubmitting(true);
     try {
-      await axios.post(`${API}/api/expenses`, { amount: parseFloat(amount), originalCurrency, category, description, date });
+      await axios.post(`${API}/api/expenses`, { amount: parseFloat(amount), originalCurrency, category, description, date }, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
       setAmount(''); setCategory('Travel'); setDate(new Date().toISOString().split('T')[0]);
-      setDescription(''); setFile(null);
+      setDescription(''); setFile(null); setConfidence({ amount: 0, category: 0, date: 0 }); setRiskData(null);
+      toast.success('Expense submitted successfully!');
       fetchExpenses();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Submission failed');
+      toast.error(err.response?.data?.error || 'Submission failed');
     } finally { setSubmitting(false); }
   };
 
@@ -200,7 +212,11 @@ export default function EmployeeDash() {
         </div>
         <form onSubmit={handleSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <input type="number" step="0.01" className="glass-input" placeholder="Amount *" value={amount} onChange={e => setAmount(e.target.value)} required />
+            <div style={{ position: 'relative' }}>
+              <input type="number" step="0.01" className="glass-input" placeholder="Amount *" value={amount} onChange={e => { setAmount(e.target.value); setConfidence(p => ({...p, amount: 0}))}} required style={{ paddingRight: '60px' }} />
+              {confidence.amount > 0 && <span style={{ position: 'absolute', right: 10, top: 10, fontSize: '0.75rem', color: confidence.amount < 70 ? 'var(--danger)' : 'var(--success)' }}>{confidence.amount}% conf</span>}
+            </div>
+            
             <select className="glass-input" value={originalCurrency} onChange={e => setOriginalCurrency(e.target.value)}>
               <option value="INR">🇮🇳 INR</option>
               <option value="USD">🇺🇸 USD</option>
@@ -209,18 +225,36 @@ export default function EmployeeDash() {
               <option value="JPY">🇯🇵 JPY</option>
               <option value="AUD">🇦🇺 AUD</option>
             </select>
-            <select className="glass-input" value={category} onChange={e => setCategory(e.target.value)}>
-              <option value="Travel">✈️ Travel</option>
-              <option value="Meals">🍽️ Meals</option>
-              <option value="Transport">🚗 Transport</option>
-              <option value="Accommodation">🏨 Accommodation</option>
-              <option value="Software">💻 Software</option>
-              <option value="Other">📦 Other</option>
-            </select>
-            <input type="date" className="glass-input" value={date} onChange={e => setDate(e.target.value)} required />
+            
+            <div style={{ position: 'relative' }}>
+              <select className="glass-input" value={category} onChange={e => { setCategory(e.target.value); setConfidence(p => ({...p, category: 0}))}}>
+                <option value="Travel">✈️ Travel</option>
+                <option value="Meals">🍽️ Meals</option>
+                <option value="Transport">🚗 Transport</option>
+                <option value="Accommodation">🏨 Accommodation</option>
+                <option value="Software">💻 Software</option>
+                <option value="Other">📦 Other</option>
+              </select>
+              {confidence.category > 0 && <span style={{ position: 'absolute', right: 30, top: 10, fontSize: '0.75rem', color: confidence.category < 70 ? 'var(--danger)' : 'var(--success)', pointerEvents: 'none' }}>{confidence.category}% conf</span>}
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <input type="date" className="glass-input" value={date} onChange={e => { setDate(e.target.value); setConfidence(p => ({...p, date: 0}))}} required />
+              {confidence.date > 0 && <span style={{ position: 'absolute', right: 30, top: 10, fontSize: '0.75rem', color: confidence.date < 70 ? 'var(--danger)' : 'var(--success)', pointerEvents: 'none' }}>{confidence.date}% conf</span>}
+            </div>
           </div>
           <input type="text" className="glass-input" placeholder="Description (optional)" value={description}
-            onChange={e => setDescription(e.target.value)} style={{ marginTop: '0.5rem' }} />
+            onChange={e => setDescription(e.target.value)} style={{ marginTop: '0.75rem' }} />
+
+          {riskData && (
+            <div style={{ padding: '0.75rem', marginTop: '1rem', borderRadius: '6px', background: riskData.fraudWarning ? 'rgba(239,68,68,0.1)' : riskData.riskScore === 'HIGH' ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)', border: `1px solid ${riskData.fraudWarning ? 'var(--danger)' : riskData.riskScore === 'HIGH' ? '#f59e0b' : 'var(--success)'}` }}>
+               <div style={{ fontSize: '0.85rem', fontWeight: 600, color: riskData.fraudWarning ? 'var(--danger)' : riskData.riskScore === 'HIGH' ? '#d97706' : 'var(--success)' }}>
+                  {riskData.fraudWarning ? '🚨 Fraud Warning' : `📊 Risk Level: ${riskData.riskScore}`}
+               </div>
+               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>{riskData.riskReasoning}</div>
+            </div>
+          )}
+
           <ShimmerButton variant="primary" onClick={undefined} style={{ marginTop: '1rem', maxWidth: 240 }} disabled={submitting}>
             <Plus size={18} /> {submitting ? 'Submitting...' : 'Submit for Approval'}
           </ShimmerButton>

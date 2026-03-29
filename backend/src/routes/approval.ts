@@ -31,58 +31,34 @@ router.post('/:id/review', requireAuth, async (req: Request, res: Response) => {
     await approval.update({ status, comments: comments || null });
 
     if (status === 'REJECTED') {
-      await expense.update({ status: 'REJECTED' });
-      return res.json({ message: 'Expense rejected' });
+      // Small optimization: an early reject might not kill a percentage rule if others can pass. But we let engine check it.
     }
 
-    // ── APPROVED — check if there is a next step ─────────────────────────────
-    const activeWorkflow = await Workflow.findOne({
-      where: { companyId: expense.companyId, isActive: true }
-    }) as any;
+    const { checkStepResolution, routeToStep } = require('../engine');
+    const resolution = await checkStepResolution(expense, approval.stepIndex);
 
-    if (activeWorkflow) {
-      const nextStepIndex = (approval.stepIndex as number) + 1;
+    if (resolution.resolved) {
+      if (resolution.approved) {
+        // Step passed! Route to next step
+        const nextStepIndex = (approval.stepIndex as number) + 1;
+        const successfullyRouted = await routeToStep(expense, nextStepIndex);
 
-      const nextStep = await WorkflowStep.findOne({
-        where: { workflowId: activeWorkflow.id, sequenceIndex: nextStepIndex },
-        order: [['sequenceIndex', 'ASC']]
-      }) as any;
-
-      if (nextStep) {
-        // Resolve who the next approver is
-        let nextApproverId: string | null = nextStep.approverId || null;
-
-        if (!nextApproverId && nextStep.approverRole === 'ADMIN') {
-          // Find the company Admin as the next approver (Director)
-          const adminUser = await User.findOne({
-            where: { companyId: expense.companyId, role: 'ADMIN' }
-          }) as any;
-          if (adminUser) nextApproverId = adminUser.id;
-        } else if (!nextApproverId && nextStep.approverRole === 'MANAGER') {
-          // Fallback: route to employee's manager
-          const submitter = await User.findByPk(expense.userId) as any;
-          if (submitter?.managerId) nextApproverId = submitter.managerId;
+        if (successfullyRouted) {
+          await expense.update({ currentStepIndex: nextStepIndex, explanation: resolution.explanation });
+          return res.json({ message: `Step ${approval.stepIndex} approved — routed to next approver(s)` });
+        } else {
+          // No more steps
+          await expense.update({ status: 'APPROVED', explanation: resolution.explanation || '✅ Expense fully approved!' });
+          return res.json({ message: '✅ Expense fully approved!' });
         }
-
-        if (nextApproverId) {
-          await ExpenseApproval.create({
-            expenseId: expense.id,
-            stepIndex: nextStepIndex,
-            approverId: nextApproverId,
-            status: 'PENDING'
-          });
-          // Update which step the expense is on
-          await expense.update({ currentStepIndex: nextStepIndex });
-          return res.json({
-            message: `Step ${approval.stepIndex} approved — routed to next approver (Step ${nextStepIndex})`
-          });
-        }
+      } else {
+        await expense.update({ status: 'REJECTED', explanation: resolution.explanation || '❌ Expense rejected' });
+        return res.json({ message: `Expense rejected: ${resolution.explanation}` });
       }
+    } else {
+      // Step not yet resolved (e.g. waiting for more people in PERCENTAGE rule)
+      return res.json({ message: 'Approval recorded. Waiting for additional approvers.' });
     }
-
-    // No more steps — fully approved
-    await expense.update({ status: 'APPROVED' });
-    res.json({ message: '✅ Expense fully approved!' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

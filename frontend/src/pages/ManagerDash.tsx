@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import toast from 'react-hot-toast';
 import { Check, X } from 'lucide-react';
 import { StaggerList, StaggerItem, ShimmerButton } from '../components/ui';
 
@@ -34,9 +35,10 @@ export default function ManagerDash({ view = 'approvals' }: { view?: 'approvals'
   const handleReview = async (approvalId: string, status: 'APPROVED' | 'REJECTED') => {
     try {
       await axios.post(`${API}/api/approvals/${approvalId}/review`, { status });
+      toast.success(`Expense ${status.toLowerCase()} successfully`);
       fetchExpenses();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to review');
+      toast.error(err.response?.data?.error || 'Failed to review');
     }
   };
 
@@ -116,10 +118,22 @@ export default function ManagerDash({ view = 'approvals' }: { view?: 'approvals'
                           </span>
                         )}
                       </div>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                        📁 {exp.category} &nbsp;|&nbsp; 📅 {new Date(exp.date).toLocaleDateString()}
+                      <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.4rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <span>📁 {exp.category}</span>
+                        <span>📅 {new Date(exp.date).toLocaleDateString()}</span>
+                        {exp.riskScore === 'HIGH' && (
+                          <span style={{ color: '#d97706', fontWeight: 600, background: 'rgba(245,158,11,0.15)', padding: '2px 8px', borderRadius: '4px' }}>⚠️ HIGH RISK</span>
+                        )}
+                        {exp.fraudWarning && (
+                          <span style={{ color: 'var(--danger)', fontWeight: 600, background: 'rgba(239,68,68,0.15)', padding: '2px 8px', borderRadius: '4px' }}>🚨 FRAUD WARNING</span>
+                        )}
                       </div>
-                      {exp.description && <div style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>{exp.description}</div>}
+                      {exp.description && <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', fontStyle: 'italic', color: 'var(--text-secondary)' }}>"{exp.description}"</div>}
+                      {exp.riskReasoning && exp.riskScore !== 'LOW' && (
+                        <div style={{ fontSize: '0.75rem', marginTop: '0.35rem', color: exp.fraudWarning ? 'var(--danger)' : '#d97706' }}>
+                          Analysis: {exp.riskReasoning}
+                        </div>
+                      )}
                     </div>
                     <span className="badge pending">PENDING</span>
                   </div>

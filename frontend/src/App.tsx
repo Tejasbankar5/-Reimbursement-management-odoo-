@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AdminLogin, UserLogin } from './pages/Login';
 import Signup from './pages/Signup';
@@ -44,6 +45,7 @@ function AppConfig() {
         {/* Catch-all: if logged in go to dashboard, else go to landing */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
+      <Toaster position="top-right" />
     </BrowserRouter>
   );
 }

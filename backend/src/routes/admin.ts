@@ -180,4 +180,39 @@ router.post('/expenses/:id/override', requireAuth, requireRole(['ADMIN']), async
   }
 });
 
+// ─── SELF-HEALING SYSTEM ──────────────────────────────────────────────────
+router.post('/system/self-heal', requireAuth, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const admin = (req as any).user;
+    const companyId = admin.companyId;
+
+    // Find all PENDING approvals assigned to Managers or Employees
+    const staleApprovals = await ExpenseApproval.findAll({
+      where: { status: 'PENDING' },
+      include: [
+        { model: Expense, where: { companyId, status: 'PENDING' } },
+        { model: User, as: 'approver', where: { role: 'MANAGER' } }
+      ]
+    }) as any[];
+
+    if (staleApprovals.length === 0) {
+      return res.json({ message: 'No stale approvals found to heal.' });
+    }
+
+    let escalatedCount = 0;
+    for (const approval of staleApprovals) {
+      // Re-assign to the admin who triggered this (or company admin)
+      await approval.update({
+        approverId: admin.id,
+        explanation: 'System Self-Heal: Escalated to Admin due to SLA breach (48h timeout simulated).'
+      });
+      escalatedCount++;
+    }
+
+    res.json({ message: `Successfully escalated ${escalatedCount} stale approval(s) to Director/Admin.`, healedCount: escalatedCount });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

@@ -46,11 +46,15 @@ export default function DashboardRouter() {
       {/* Sidebar */}
       <aside className="sidebar">
         {/* Logo */}
-        <div className="sidebar-logo">
-          <div style={{ width: 28, height: 28, background: 'var(--primary)', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: 'white', fontWeight: 900, fontSize: '0.8rem' }}>R</span>
+        <div className="sidebar-logo" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: 'var(--text-main)', letterSpacing: '-0.02em', fontSize: '1.25rem' }}>
+          <div style={{ padding: '0.4rem', background: 'linear-gradient(135deg, var(--primary) 0%, #2563eb 100%)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(37,99,235,0.2)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
           </div>
-          ReimburseIQ
+          Reimburse<span style={{ color: 'var(--primary)' }}>IQ</span>
         </div>
 
         {/* Nav Items */}
